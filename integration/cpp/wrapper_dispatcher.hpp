@@ -23,6 +23,7 @@
 #include <components/logical_plan/node_create_index.hpp>
 #include <components/logical_plan/node_drop_index.hpp>
 #include <components/logical_plan/node_match.hpp>
+#include <components/logical_plan/node_vector_search.hpp>
 #include <components/session/session.hpp>
 #include <components/sql/transformer/transformer.hpp>
 
@@ -95,6 +96,16 @@ namespace otterbrix {
                           components::logical_plan::parameter_node_ptr params = nullptr)
             -> components::cursor::cursor_t_ptr;
         auto execute_sql(const session_id_t& session, const std::string& query) -> components::cursor::cursor_t_ptr;
+
+        auto vector_search(const session_id_t& session,
+                           const database_name_t& database,
+                           const collection_name_t& collection,
+                           const std::string& column_name,
+                           std::vector<double> query_vector,
+                           std::size_t k,
+                           components::vector_search::metric_type metric,
+                           const components::expressions::expression_ptr& filter = nullptr)
+            -> components::cursor::cursor_t_ptr;
 
         auto get_schema(const session_id_t& session,
                         const std::pmr::vector<std::pair<database_name_t, collection_name_t>>& ids)
