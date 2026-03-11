@@ -18,6 +18,7 @@ set( ${PROJECT_NAME}_SOURCES
         test_connections.cpp
         test_udfs.cpp
         test_arithmetic.cpp
+        test_vector_search.cpp
 )
 
 add_executable(${PROJECT_NAME} main.cpp ${${PROJECT_NAME}_SOURCES})
@@ -83,3 +84,30 @@ target_link_libraries(profile_arithmetic PRIVATE
         ZLIB::ZLIB
         BZip2::BZip2
 )
+
+# Vector search pre-filtering benchmark
+add_executable(bench_vector_search bench_vector_search.cpp)
+target_link_libraries(bench_vector_search PRIVATE
+        cpp_otterbrix
+        otterbrix::test_generaty
+        otterbrix::log
+        otterbrix::collection
+        otterbrix::cursor
+        otterbrix::session
+        otterbrix::dispatcher
+        otterbrix::wal
+        otterbrix::disk
+        otterbrix::locks
+        spdlog::spdlog
+        msgpackc-cxx
+        Catch2::Catch2
+        absl::crc32c
+        absl::int128
+        benchmark::benchmark
+        actor-zeta::actor-zeta
+        Boost::boost
+        fmt::fmt
+        ZLIB::ZLIB
+        BZip2::BZip2
+)
+
