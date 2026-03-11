@@ -244,6 +244,31 @@ namespace otterbrix {
         }
     }
 
+    auto wrapper_dispatcher_t::vector_search(const session_id_t& session,
+                                             const database_name_t& database,
+                                             const collection_name_t& collection,
+                                             const std::string& column_name,
+                                             std::vector<double> query_vector,
+                                             std::size_t k,
+                                             components::vector_search::metric_type metric,
+                                             const components::expressions::expression_ptr& filter) -> cursor_t_ptr {
+        trace(log_,
+              "wrapper_dispatcher_t::vector_search session: {}, database: {} collection: {} column: {} k: {}",
+              session.data(),
+              database,
+              collection,
+              column_name,
+              k);
+        auto node = components::logical_plan::make_node_vector_search(resource(),
+                                                                      {database, collection},
+                                                                      column_name,
+                                                                      std::move(query_vector),
+                                                                      k,
+                                                                      metric,
+                                                                      filter);
+        return execute_plan(session, std::move(node));
+    }
+
     auto wrapper_dispatcher_t::get_schema(const components::session::session_id_t& session,
                                           const std::pmr::vector<std::pair<database_name_t, collection_name_t>>& ids)
         -> components::cursor::cursor_t_ptr {

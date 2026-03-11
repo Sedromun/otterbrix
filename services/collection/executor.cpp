@@ -477,7 +477,8 @@ namespace services::collection::executor {
 
                 case components::operators::operator_type::raw_data:
                 case components::operators::operator_type::join:
-                case components::operators::operator_type::aggregate: {
+                case components::operators::operator_type::aggregate:
+                case components::operators::operator_type::vector_search: {
                     if (plan->type() == components::operators::operator_type::aggregate) {
                         trace(log_,
                               "executor::execute_plan : operators::operator_type::aggregate, session: {}",

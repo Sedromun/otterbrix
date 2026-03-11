@@ -56,14 +56,43 @@ namespace components::operators {
                 throw std::runtime_error("unsupported compare_type in expression to filter conversion");
             case expressions::compare_type::is_null:
             case expressions::compare_type::is_not_null: {
-                const auto& path = std::get<expressions::key_t>(expression->left()).path();
-                std::pmr::vector<uint64_t> indices(path.begin(), path.end(), path.get_allocator().resource());
+                const auto& key = std::get<expressions::key_t>(expression->left());
+                const auto& path = key.path();
+                std::pmr::vector<uint64_t> indices(path.get_allocator().resource());
+                if (!path.empty()) {
+                    indices.assign(path.begin(), path.end());
+                } else {
+                    // Resolve column by alias when path not yet populated (manually constructed expressions)
+                    auto col_name = key.as_string();
+                    for (size_t i = 0; i < types.size(); ++i) {
+                        if (types[i].has_alias() && types[i].alias() == col_name) {
+                            indices.push_back(static_cast<uint64_t>(i));
+                            break;
+                        }
+                    }
+                }
                 return std::make_unique<table::is_null_filter_t>(expression->type(), std::move(indices));
             }
             default: {
-                const auto& path = std::get<expressions::key_t>(expression->left()).path();
+                const auto& key = std::get<expressions::key_t>(expression->left());
+                const auto& path = key.path();
                 auto id = std::get<core::parameter_id_t>(expression->right());
-                std::pmr::vector<uint64_t> indices(path.begin(), path.end(), path.get_allocator().resource());
+                if (!parameters || parameters->parameters.find(id) == parameters->parameters.end()) {
+                    throw std::runtime_error("parameter not found but required for filter conversion");
+                }
+                std::pmr::vector<uint64_t> indices(path.get_allocator().resource());
+                if (!path.empty()) {
+                    indices.assign(path.begin(), path.end());
+                } else {
+                    // Resolve column by alias when path not yet populated (manually constructed expressions)
+                    auto col_name = key.as_string();
+                    for (size_t i = 0; i < types.size(); ++i) {
+                        if (types[i].has_alias() && types[i].alias() == col_name) {
+                            indices.push_back(static_cast<uint64_t>(i));
+                            break;
+                        }
+                    }
+                }
                 return std::make_unique<table::constant_filter_t>(expression->type(),
                                                                   parameters->parameters.at(id),
                                                                   std::move(indices));
