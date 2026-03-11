@@ -313,3 +313,24 @@ TEST_CASE("components::sql::select_from_fields") {
         R"_($aggregate: {$select: {number, size: {$constant: #0}, title: {$constant: #1}, on: {$constant: #2}, off: {$constant: #3}}})_",
         vec({v(&resource, 10l), v(&resource, "title"), v(&resource, true), v(&resource, false)}));
 }
+
+TEST_CASE("components::sql::vector_search") {
+    auto resource = std::pmr::synchronized_pool_resource();
+    std::pmr::monotonic_buffer_resource arena_resource(&resource);
+    transform::transformer transformer(&resource);
+
+    TEST_SIMPLE_SELECT(
+        R"_(SELECT * FROM TestCollection ORDER BY vec_distance(embedding, '[1.0, 2.0, 3.0]') LIMIT 10;)_",
+        R"_($vector_search: {column: "embedding", k: 10, metric: "l2", query_dim: 3})_",
+        vec());
+
+    TEST_SIMPLE_SELECT(
+        R"_(SELECT * FROM TestCollection ORDER BY vec_distance(embedding, '[1.0, 2.0, 3.0]', 'cosine') LIMIT 5;)_",
+        R"_($vector_search: {column: "embedding", k: 5, metric: "cosine", query_dim: 3})_",
+        vec());
+
+    TEST_SIMPLE_SELECT(
+        R"_(SELECT * FROM TestCollection WHERE category >= 90 ORDER BY vec_distance(embedding, '[1.0, 2.0]', 'cosine') LIMIT 5;)_",
+        R"_($vector_search: {column: "embedding", k: 5, metric: "cosine", query_dim: 2})_",
+        vec({v(&resource, 90l)}));
+}
