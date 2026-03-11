@@ -38,6 +38,7 @@ namespace components::logical_plan {
         checkpoint_t,
         vacuum_t,
         having_t,
+        vector_search_t,
         unused
     };
 
