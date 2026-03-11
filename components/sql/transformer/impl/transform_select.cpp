@@ -8,6 +8,7 @@
 #include <components/logical_plan/node_limit.hpp>
 #include <components/logical_plan/node_match.hpp>
 #include <components/logical_plan/node_sort.hpp>
+#include <components/logical_plan/node_vector_search.hpp>
 #include <components/sql/parser/pg_functions.h>
 #include <components/sql/transformer/transformer.hpp>
 #include <components/sql/transformer/utils.hpp>
@@ -300,17 +301,17 @@ namespace components::sql::transform {
         }
 
         // where
+        expression_ptr where_expr;
         if (node.whereClause) {
-            expression_ptr expr;
             if (nodeTag(node.whereClause) == T_FuncCall) {
-                expr = transform_a_expr_func(pg_ptr_cast<FuncCall>(node.whereClause), names, params);
+                where_expr = transform_a_expr_func(pg_ptr_cast<FuncCall>(node.whereClause), names, params);
             } else if (nodeTag(node.whereClause) == T_NullTest) {
-                expr = transform_null_test(pg_ptr_cast<NullTest>(node.whereClause), names, params);
+                where_expr = transform_null_test(pg_ptr_cast<NullTest>(node.whereClause), names, params);
             } else {
-                expr = transform_a_expr(pg_ptr_cast<A_Expr>(node.whereClause), names, params);
+                where_expr = transform_a_expr(pg_ptr_cast<A_Expr>(node.whereClause), names, params);
             }
-            if (expr) {
-                agg->append_child(logical_plan::make_node_match(resource_, agg->collection_full_name(), expr));
+            if (where_expr) {
+                agg->append_child(logical_plan::make_node_match(resource_, agg->collection_full_name(), where_expr));
             }
         }
 
@@ -362,6 +363,92 @@ namespace components::sql::transform {
         // distinct
         if (node.distinctClause && !node.distinctClause->lst.empty()) {
             agg->set_distinct(true);
+        }
+
+        // vector search interception
+        if (node.sortClause && node.sortClause->lst.size() == 1) {
+            auto sortby = pg_ptr_cast<SortBy>(node.sortClause->lst.front().data);
+            if (nodeTag(sortby->node) == T_FuncCall) {
+                auto func = pg_ptr_cast<FuncCall>(sortby->node);
+                auto funcname = std::string{strVal(linitial(func->funcname))};
+                if (funcname == "vec_distance" || funcname == "vector_search") {
+                    if (func->args->lst.size() < 2) {
+                        throw parser_exception_t("vec_distance requires at least (column, query_vector)", "");
+                    }
+
+                    // 1. Column name
+                    auto arg1 = pg_ptr_cast<Node>(func->args->lst.front().data);
+                    if (nodeTag(arg1) != T_ColumnRef) {
+                        throw parser_exception_t("1st arg to vec_distance must be a column name", "");
+                    }
+                    std::string column_name = strVal(pg_ptr_cast<ColumnRef>(arg1)->fields->lst.back().data);
+
+                    // 2. Query vector
+                    std::vector<Node*> v_args;
+                    for (auto& a : func->args->lst) v_args.push_back(pg_ptr_cast<Node>(a.data));
+
+                    auto arg2_val = get_value(resource_, v_args[1]);
+                    std::vector<double> query_vector;
+                    if (arg2_val.type() == types::logical_type::ARRAY) {
+                        if (auto* mem_arr = arg2_val.value<std::vector<types::logical_value_t>*>()) {
+                            for (auto& elem : *mem_arr) {
+                                if (elem.type() == types::logical_type::FLOAT ||
+                                    elem.type() == types::logical_type::DOUBLE) {
+                                    query_vector.push_back(elem.value<double>());
+                                } else if (elem.type() == types::logical_type::INTEGER ||
+                                           elem.type() == types::logical_type::BIGINT) {
+                                    query_vector.push_back(static_cast<double>(elem.value<int64_t>()));
+                                }
+                            }
+                        }
+                    } else if (arg2_val.type() == types::logical_type::STRING_LITERAL) {
+                        std::string_view s = arg2_val.value<std::string_view>();
+                        std::string current_num;
+                        for (char c : s) {
+                            if (std::isdigit(c) || c == '.' || c == '-' || c == '+') {
+                                current_num += c;
+                            } else if ((c == ',' || c == ']') && !current_num.empty()) {
+                                query_vector.push_back(std::stod(current_num));
+                                current_num.clear();
+                            }
+                        }
+                    } else {
+                        throw parser_exception_t("2nd arg to vec_distance must be an ARRAY or STRING", "");
+                    }
+
+                    // 3. Metric
+                    vector_search::metric_type m_type = vector_search::metric_type::l2;
+                    if (v_args.size() >= 3) {
+                        auto arg3_val = get_value(resource_, v_args[2]);
+                        if (arg3_val.type() == types::logical_type::STRING_LITERAL) {
+                            std::string_view m_str = arg3_val.value<std::string_view>();
+                            if (m_str == "cosine" || m_str == "COSINE")
+                                m_type = vector_search::metric_type::cosine;
+                        }
+                    }
+
+                    // 4. K Limit
+                    size_t k = 10;
+                    if (node.limitCount) {
+                        auto* value = &(pg_ptr_cast<A_Const>(node.limitCount)->val);
+                        if (nodeTag(value) == T_Integer)
+                            k = intVal(value);
+                    }
+
+                    components::expressions::compare_expression_ptr filter;
+                    if (where_expr) {
+                        filter = boost::static_pointer_cast<components::expressions::compare_expression_t>(where_expr);
+                    }
+
+                    return logical_plan::make_node_vector_search(resource_,
+                                                                 agg->collection_full_name(),
+                                                                 column_name,
+                                                                 query_vector,
+                                                                 k,
+                                                                 m_type,
+                                                                 filter);
+                }
+            }
         }
 
         // order by

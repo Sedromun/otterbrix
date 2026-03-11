@@ -11,18 +11,16 @@ using v = components::types::logical_value_t;
 using vec = std::vector<v>;
 
 #define TEST_SIMPLE_SELECT(QUERY, RESULT, PARAMS)                                                                      \
-    {                                                                                                                  \
-        SECTION(QUERY) {                                                                                               \
-            auto select = linitial(raw_parser(&arena_resource, QUERY));                                                \
-            auto result = std::get<result_view>(transformer.transform(pg_cell_to_node_cast(select)).finalize());       \
-            auto node = result.node;                                                                                   \
-            auto agg = result.params;                                                                                  \
-            REQUIRE(node->to_string() == RESULT);                                                                      \
-            REQUIRE(agg->parameters().parameters.size() == PARAMS.size());                                             \
-            for (auto i = 0ul; i < PARAMS.size(); ++i) {                                                               \
-                REQUIRE(agg->parameter(core::parameter_id_t(uint16_t(i))) == PARAMS.at(i));                            \
-            }                                                                                                          \
-        }                                                                                                              \
+    {SECTION(QUERY){auto select = linitial(raw_parser(&arena_resource, QUERY));                                        \
+    auto result = std::get<result_view>(transformer.transform(pg_cell_to_node_cast(select)).finalize());               \
+    auto node = result.node;                                                                                           \
+    auto agg = result.params;                                                                                          \
+    REQUIRE(node->to_string() == RESULT);                                                                              \
+    REQUIRE(agg->parameters().parameters.size() == PARAMS.size());                                                     \
+    for (auto i = 0ul; i < PARAMS.size(); ++i) {                                                                       \
+        REQUIRE(agg->parameter(core::parameter_id_t(uint16_t(i))) == PARAMS.at(i));                                    \
+    }                                                                                                                  \
+    }                                                                                                                  \
     }
 
 TEST_CASE("components::sql::select_from_where") {
@@ -290,4 +288,25 @@ TEST_CASE("components::sql::select_from_fields") {
         R"_(SELECT number, 10 size, 'title' title, true "on", false "off" FROM TestDatabase.TestCollection;)_",
         R"_($aggregate: {$group: {number, size: #0, title: #1, on: #2, off: #3}})_",
         vec({v(&resource, 10l), v(&resource, "title"), v(&resource, true), v(&resource, false)}));
+}
+
+TEST_CASE("components::sql::vector_search") {
+    auto resource = std::pmr::synchronized_pool_resource();
+    std::pmr::monotonic_buffer_resource arena_resource(&resource);
+    transform::transformer transformer(&resource);
+
+    TEST_SIMPLE_SELECT(
+        R"_(SELECT * FROM TestCollection ORDER BY vec_distance(embedding, '[1.0, 2.0, 3.0]') LIMIT 10;)_",
+        R"_($vector_search: {column: "embedding", k: 10, metric: "l2", query_dim: 3})_",
+        vec());
+
+    TEST_SIMPLE_SELECT(
+        R"_(SELECT * FROM TestCollection ORDER BY vec_distance(embedding, '[1.0, 2.0, 3.0]', 'cosine') LIMIT 5;)_",
+        R"_($vector_search: {column: "embedding", k: 5, metric: "cosine", query_dim: 3})_",
+        vec());
+
+    TEST_SIMPLE_SELECT(
+        R"_(SELECT * FROM TestCollection WHERE category >= 90 ORDER BY vec_distance(embedding, '[1.0, 2.0]', 'cosine') LIMIT 5;)_",
+        R"_($vector_search: {column: "embedding", k: 5, metric: "cosine", query_dim: 2})_",
+        vec({v(&resource, 90l)}));
 }
