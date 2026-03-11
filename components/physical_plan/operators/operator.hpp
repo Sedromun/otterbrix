@@ -28,12 +28,13 @@ namespace components::operators {
         sort,
         join,
         aggregate,
-        raw_data
+        raw_data,
+        vector_search
     };
 
     inline bool is_scan(operator_type t) {
         return t == operator_type::full_scan || t == operator_type::transfer_scan || t == operator_type::index_scan ||
-               t == operator_type::primary_key_scan;
+               t == operator_type::primary_key_scan || t == operator_type::vector_search;
     }
 
     enum class operator_state

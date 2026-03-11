@@ -30,6 +30,7 @@ set(SOURCE_${PROJECT_NAME}
         node_sort.cpp
         node_update.cpp
         node_vacuum.cpp
+        node_vector_search.cpp
         param_storage.cpp
 )
 

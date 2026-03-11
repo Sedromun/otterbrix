@@ -38,6 +38,7 @@ namespace components::logical_plan {
         checkpoint_t,
         vacuum_t,
         having_t,
+        vector_search_t,
         unused
     };
 
@@ -105,6 +106,8 @@ namespace components::logical_plan {
                 return "vacuum_t";
             case node_type::having_t:
                 return "having_t";
+            case node_type::vector_search_t:
+                return "vector_search_t";
             default:
                 return "unused";
         }

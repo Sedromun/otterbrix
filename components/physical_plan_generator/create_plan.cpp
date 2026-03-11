@@ -9,6 +9,7 @@
 #include "impl/create_plan_match.hpp"
 #include "impl/create_plan_sort.hpp"
 #include "impl/create_plan_update.hpp"
+#include "impl/create_plan_vector_search.hpp"
 
 namespace services::planner {
 
@@ -40,6 +41,8 @@ namespace services::planner {
                 return impl::create_plan_update(context, node);
             case node_type::join_t:
                 return impl::create_plan_join(context, function_registry, node, std::move(limit), params);
+            case node_type::vector_search_t:
+                return impl::create_plan_vector_search(context, node);
             default:
                 break;
         }

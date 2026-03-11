@@ -38,6 +38,8 @@ set(${PROJECT_NAME}_SOURCES
         operators/operator_sort.cpp
         operators/operator_join.cpp
 
+        operators/operator_vector_search.cpp
+
         operators/arithmetic_eval.cpp
         operators/transformation.cpp
 )

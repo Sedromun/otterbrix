@@ -11,6 +11,7 @@ set(${PROJECT_NAME}_SOURCES
         impl/create_plan_sort.cpp
         impl/create_plan_update.cpp
         impl/create_plan_join.cpp
+        impl/create_plan_vector_search.cpp
 )
 
 add_library(otterbrix_${PROJECT_NAME}
