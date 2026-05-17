@@ -14,6 +14,8 @@
 #include <components/sql/transformer/transformer.hpp>
 #include <components/sql/transformer/utils.hpp>
 
+#include <algorithm>
+#include <cctype>
 
 using namespace components::expressions;
 
@@ -605,7 +607,26 @@ namespace components::sql::transform {
                 auto func = pg_ptr_cast<FuncCall>(sortby->node);
                 auto funcname = std::string{strVal(linitial(func->funcname))};
                 if (funcname == "vec_distance" || funcname == "vector_search") {
-                    if (func->args->lst.size() < 2) {
+                    // Vector search is incompatible with DISTINCT / GROUP BY / HAVING:
+                    // sorting is performed by distance to query vector and Top-K is selected,
+                    // not by aggregated rows.
+                    if (node.distinctClause && !node.distinctClause->lst.empty()) {
+                        throw parser_exception_t("vec_distance: DISTINCT is not supported", "");
+                    }
+                    if (node.groupClause && !node.groupClause->lst.empty()) {
+                        throw parser_exception_t("vec_distance: GROUP BY is not supported", "");
+                    }
+                    if (node.havingClause) {
+                        throw parser_exception_t("vec_distance: HAVING is not supported", "");
+                    }
+                    // ORDER BY direction must be ascending — vector search returns nearest first.
+                    if (sortby->sortby_dir == SORTBY_DESC) {
+                        throw parser_exception_t(
+                            "vec_distance: ORDER BY ... DESC is not supported (results are nearest-first)",
+                            "");
+                    }
+
+                    if (!func->args || func->args->lst.size() < 2) {
                         throw parser_exception_t("vec_distance requires at least (column, query_vector)", "");
                     }
 
@@ -625,61 +646,131 @@ namespace components::sql::transform {
                     if (arg2_val.type() == types::logical_type::ARRAY) {
                         if (auto* mem_arr = arg2_val.value<std::vector<types::logical_value_t>*>()) {
                             for (auto& elem : *mem_arr) {
-                                if (elem.type() == types::logical_type::FLOAT ||
-                                    elem.type() == types::logical_type::DOUBLE) {
+                                auto et = elem.type();
+                                if (et == types::logical_type::FLOAT || et == types::logical_type::DOUBLE) {
                                     query_vector.push_back(elem.value<double>());
-                                } else if (elem.type() == types::logical_type::INTEGER ||
-                                           elem.type() == types::logical_type::BIGINT) {
+                                } else if (et == types::logical_type::INTEGER) {
+                                    query_vector.push_back(static_cast<double>(elem.value<int32_t>()));
+                                } else if (et == types::logical_type::BIGINT) {
                                     query_vector.push_back(static_cast<double>(elem.value<int64_t>()));
+                                } else if (et == types::logical_type::SMALLINT) {
+                                    query_vector.push_back(static_cast<double>(elem.value<int16_t>()));
+                                } else if (et == types::logical_type::TINYINT) {
+                                    query_vector.push_back(static_cast<double>(elem.value<int8_t>()));
+                                } else {
+                                    throw parser_exception_t(
+                                        "vec_distance: unsupported element type in query vector", "");
                                 }
                             }
                         }
                     } else if (arg2_val.type() == types::logical_type::STRING_LITERAL) {
                         std::string_view s = arg2_val.value<std::string_view>();
                         std::string current_num;
-                        for (char c : s) {
-                            if (std::isdigit(c) || c == '.' || c == '-' || c == '+') {
-                                current_num += c;
-                            } else if ((c == ',' || c == ']') && !current_num.empty()) {
+                        auto flush = [&]() {
+                            if (current_num.empty()) {
+                                return;
+                            }
+                            try {
                                 query_vector.push_back(std::stod(current_num));
-                                current_num.clear();
+                            } catch (const std::exception&) {
+                                throw parser_exception_t(
+                                    "vec_distance: failed to parse number '" + current_num +
+                                        "' in query vector",
+                                    "");
+                            }
+                            current_num.clear();
+                        };
+                        for (char c : s) {
+                            if (std::isdigit(static_cast<unsigned char>(c)) || c == '.' || c == '-' ||
+                                c == '+' || c == 'e' || c == 'E') {
+                                current_num += c;
+                            } else if (c == ',' || c == ']') {
+                                flush();
                             }
                         }
+                        flush(); // handle trailing number without closing ']' or ','
                     } else {
                         throw parser_exception_t("2nd arg to vec_distance must be an ARRAY or STRING", "");
                     }
 
-                    // 3. Metric
+                    if (query_vector.empty()) {
+                        throw parser_exception_t("vec_distance: query vector is empty", "");
+                    }
+
+                    // 3. Metric (default L2)
                     vector_search::metric_type m_type = vector_search::metric_type::l2;
                     if (v_args.size() >= 3) {
                         auto arg3_val = get_value(resource_, v_args[2]);
-                        if (arg3_val.type() == types::logical_type::STRING_LITERAL) {
-                            std::string_view m_str = arg3_val.value<std::string_view>();
-                            if (m_str == "cosine" || m_str == "COSINE")
-                                m_type = vector_search::metric_type::cosine;
+                        if (arg3_val.type() != types::logical_type::STRING_LITERAL) {
+                            throw parser_exception_t("vec_distance: metric must be a string literal", "");
+                        }
+                        std::string_view m_view = arg3_val.value<std::string_view>();
+                        std::string m_lower(m_view);
+                        std::transform(m_lower.begin(), m_lower.end(), m_lower.begin(), [](unsigned char c) {
+                            return std::tolower(c);
+                        });
+                        try {
+                            m_type = vector_search::metric_from_string(m_lower);
+                        } catch (const std::exception& e) {
+                            throw parser_exception_t(std::string{"vec_distance: "} + e.what(), "");
                         }
                     }
 
-                    // 4. K Limit
+                    // 4. Filter strategy (default post)
+                    vector_search::filter_strategy strategy = vector_search::filter_strategy::post_filter;
+                    if (v_args.size() >= 4) {
+                        auto arg4_val = get_value(resource_, v_args[3]);
+                        if (arg4_val.type() != types::logical_type::STRING_LITERAL) {
+                            throw parser_exception_t("vec_distance: filter strategy must be a string literal",
+                                                     "");
+                        }
+                        std::string_view s_view = arg4_val.value<std::string_view>();
+                        std::string s_lower(s_view);
+                        std::transform(s_lower.begin(), s_lower.end(), s_lower.begin(), [](unsigned char c) {
+                            return std::tolower(c);
+                        });
+                        if (s_lower == "pre" || s_lower == "pre_filter" || s_lower == "prefilter") {
+                            strategy = vector_search::filter_strategy::pre_filter;
+                        } else if (s_lower == "post" || s_lower == "post_filter" || s_lower == "postfilter") {
+                            strategy = vector_search::filter_strategy::post_filter;
+                        } else {
+                            throw parser_exception_t(
+                                "vec_distance: unknown filter strategy (expected 'pre' or 'post')", "");
+                        }
+                    }
+
+                    // 5. K Limit
                     size_t k = 10;
                     if (node.limitCount) {
                         auto* value = &(pg_ptr_cast<A_Const>(node.limitCount)->val);
-                        if (nodeTag(value) == T_Integer)
-                            k = intVal(value);
+                        if (nodeTag(value) == T_Integer) {
+                            int lim = intVal(value);
+                            if (lim < 0) {
+                                throw parser_exception_t("vec_distance: LIMIT must be non-negative", "");
+                            }
+                            k = static_cast<size_t>(lim);
+                        }
                     }
 
                     components::expressions::compare_expression_ptr filter;
                     if (where_expr) {
-                        filter = boost::static_pointer_cast<components::expressions::compare_expression_t>(where_expr);
+                        filter = boost::dynamic_pointer_cast<components::expressions::compare_expression_t>(
+                            where_expr);
+                        if (!filter) {
+                            throw parser_exception_t(
+                                "vec_distance: only simple comparison predicates are supported in WHERE",
+                                "");
+                        }
                     }
 
                     return logical_plan::make_node_vector_search(resource_,
                                                                  agg->collection_full_name(),
                                                                  column_name,
-                                                                 query_vector,
+                                                                 std::move(query_vector),
                                                                  k,
                                                                  m_type,
-                                                                 filter);
+                                                                 filter,
+                                                                 strategy);
                 }
             }
         }

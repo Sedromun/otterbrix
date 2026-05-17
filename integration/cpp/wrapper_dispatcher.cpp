@@ -263,7 +263,9 @@ namespace otterbrix {
                                              std::vector<double> query_vector,
                                              std::size_t k,
                                              components::vector_search::metric_type metric,
-                                             const components::expressions::expression_ptr& filter) -> cursor_t_ptr {
+                                             const components::expressions::compare_expression_ptr& filter,
+                                             components::vector_search::filter_strategy strategy)
+        -> cursor_t_ptr {
         trace(log_,
               "wrapper_dispatcher_t::vector_search session: {}, database: {} collection: {} column: {} k: {}",
               session.data(),
@@ -277,7 +279,8 @@ namespace otterbrix {
                                                                       std::move(query_vector),
                                                                       k,
                                                                       metric,
-                                                                      filter);
+                                                                      filter,
+                                                                      strategy);
         return execute_plan(session, std::move(node));
     }
 

@@ -53,7 +53,10 @@ namespace components::vector_search {
                                   const std::vector<T>& query,
                                   std::size_t k,
                                   metric_type metric) {
-        if (data.empty() || query.empty()) {
+        if (query.empty()) {
+            throw std::invalid_argument("knn_exact_search: query vector must not be empty");
+        }
+        if (data.empty() || k == 0) {
             return {};
         }
         std::size_t dim = query.size();

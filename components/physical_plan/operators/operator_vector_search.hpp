@@ -20,7 +20,8 @@ namespace components::operators {
                                  std::vector<double> query_vector,
                                  std::size_t k,
                                  vector_search::metric_type metric,
-                                 const expressions::compare_expression_ptr& filter);
+                                 const expressions::compare_expression_ptr& filter,
+                                 vector_search::filter_strategy strategy);
 
         const collection_full_name_t& collection_name() const noexcept { return name_; }
 
@@ -35,6 +36,7 @@ namespace components::operators {
         std::size_t k_;
         vector_search::metric_type metric_;
         expressions::compare_expression_ptr filter_;
+        vector_search::filter_strategy strategy_;
     };
 
 } // namespace components::operators

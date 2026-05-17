@@ -11,7 +11,19 @@ namespace components::vector_search {
     enum class metric_type : uint8_t
     {
         cosine,
-        l2
+        l2,
+        inner_product
+    };
+
+    /// Strategy of combining vector search with WHERE predicate.
+    /// - pre_filter:  predicate is pushed into storage scan, kNN runs over filtered rows.
+    ///                Fewer distance computations, but storage layer must understand the filter.
+    /// - post_filter: kNN runs over ALL rows, then the predicate is applied to Top-K.
+    ///                Matches the canonical "search then filter" semantics; may return fewer than K rows.
+    enum class filter_strategy : uint8_t
+    {
+        pre_filter,
+        post_filter
     };
 
     inline metric_type metric_from_string(const std::string& s) {
@@ -20,6 +32,9 @@ namespace components::vector_search {
         }
         if (s == "l2" || s == "euclidean") {
             return metric_type::l2;
+        }
+        if (s == "ip" || s == "inner_product" || s == "dot") {
+            return metric_type::inner_product;
         }
         throw std::invalid_argument("unknown metric type: " + s);
     }
@@ -30,13 +45,16 @@ namespace components::vector_search {
                 return "cosine";
             case metric_type::l2:
                 return "l2";
+            case metric_type::inner_product:
+                return "inner_product";
         }
         return "unknown";
     }
 
     /// Compute cosine distance = 1.0 - cosine_similarity.
     /// Returns 0.0 for identical directions, 1.0 for orthogonal, 2.0 for opposite.
-    /// If either vector has zero magnitude, returns 1.0 (undefined similarity → max distance).
+    /// If either vector has zero magnitude, returns +inf so the row is ranked last
+    /// (cosine similarity is undefined for the zero vector).
     template<typename T>
     double cosine_distance(const T* a, const T* b, std::size_t dim) {
         double dot = 0.0;
@@ -53,7 +71,7 @@ namespace components::vector_search {
 
         constexpr double eps = std::numeric_limits<double>::epsilon();
         if (norm_a <= eps || norm_b <= eps) {
-            return 1.0; // undefined similarity
+            return std::numeric_limits<double>::infinity();
         }
 
         double similarity = dot / (std::sqrt(norm_a) * std::sqrt(norm_b));
@@ -86,6 +104,18 @@ namespace components::vector_search {
         return std::sqrt(l2_distance_squared(a, b, dim));
     }
 
+    /// Compute negated inner product (a · b).
+    /// Returned as a *distance* (smaller = closer): negate the dot product so that
+    /// the same Top-K heap (min by score) gives the largest similarity.
+    template<typename T>
+    double inner_product_distance(const T* a, const T* b, std::size_t dim) {
+        double dot = 0.0;
+        for (std::size_t i = 0; i < dim; ++i) {
+            dot += static_cast<double>(a[i]) * static_cast<double>(b[i]);
+        }
+        return -dot;
+    }
+
     /// Compute distance between two vectors using the specified metric.
     /// Uses squared L2 for metric_type::l2 (preserves ordering, avoids sqrt).
     template<typename T>
@@ -95,6 +125,8 @@ namespace components::vector_search {
                 return cosine_distance(a, b, dim);
             case metric_type::l2:
                 return l2_distance_squared(a, b, dim);
+            case metric_type::inner_product:
+                return inner_product_distance(a, b, dim);
         }
         return 0.0;
     }

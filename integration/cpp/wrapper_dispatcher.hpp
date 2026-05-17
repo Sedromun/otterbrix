@@ -104,7 +104,9 @@ namespace otterbrix {
                            std::vector<double> query_vector,
                            std::size_t k,
                            components::vector_search::metric_type metric,
-                           const components::expressions::expression_ptr& filter = nullptr)
+                           const components::expressions::compare_expression_ptr& filter = nullptr,
+                           components::vector_search::filter_strategy strategy =
+                               components::vector_search::filter_strategy::post_filter)
             -> components::cursor::cursor_t_ptr;
 
         auto get_schema(const session_id_t& session,

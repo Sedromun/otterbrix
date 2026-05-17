@@ -13,7 +13,8 @@ namespace services::planner::impl {
         // Extract optional filter expression (stored as first expression on the node)
         components::expressions::compare_expression_ptr filter;
         if (!node->expressions().empty()) {
-            filter = reinterpret_cast<const components::expressions::compare_expression_ptr&>(node->expressions()[0]);
+            filter = boost::dynamic_pointer_cast<components::expressions::compare_expression_t>(
+                node->expressions()[0]);
         }
 
         if (context.has_collection(node->collection_full_name())) {
@@ -25,7 +26,8 @@ namespace services::planner::impl {
                                                                     vs_node->query_vector(),
                                                                     vs_node->k(),
                                                                     vs_node->metric(),
-                                                                    filter));
+                                                                    filter,
+                                                                    vs_node->strategy()));
         } else {
             return boost::intrusive_ptr(
                 new components::operators::operator_vector_search_t(nullptr,
@@ -35,7 +37,8 @@ namespace services::planner::impl {
                                                                     vs_node->query_vector(),
                                                                     vs_node->k(),
                                                                     vs_node->metric(),
-                                                                    filter));
+                                                                    filter,
+                                                                    vs_node->strategy()));
         }
     }
 

@@ -5,6 +5,7 @@ add_definitions(-DDEV_MODE)
 set(${PROJECT_NAME}_SOURCES
         test_distance_metrics.cpp
         test_top_k_and_knn.cpp
+        test_recall.cpp
 )
 
 add_executable(${PROJECT_NAME} main.cpp ${${PROJECT_NAME}_SOURCES})

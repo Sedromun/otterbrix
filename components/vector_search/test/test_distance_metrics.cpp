@@ -37,7 +37,8 @@ TEST_CASE("vector_search::distance_metrics::cosine::zero_vector") {
     std::vector<double> a = {1.0, 2.0, 3.0};
     std::vector<double> zero = {0.0, 0.0, 0.0};
     double dist = cosine_distance(a.data(), zero.data(), a.size());
-    REQUIRE(dist == Approx(1.0).margin(1e-10));
+    REQUIRE(std::isinf(dist));
+    REQUIRE(dist > 0.0);
 }
 
 TEST_CASE("vector_search::distance_metrics::cosine::known_value") {

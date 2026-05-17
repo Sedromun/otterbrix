@@ -2,6 +2,8 @@
 
 #include <components/physical_plan/operators/scan/full_scan.hpp>
 #include <components/physical_plan/operators/transformation.hpp>
+#include <components/table/column_state.hpp>
+#include <components/vector/data_chunk.hpp>
 #include <services/disk/manager_disk.hpp>
 #include <vector_search/knn_search.hpp>
 #include <vector_search/top_k_heap.hpp>
@@ -15,17 +17,62 @@ namespace components::operators {
                                                        std::vector<double> query_vector,
                                                        std::size_t k,
                                                        vector_search::metric_type metric,
-                                                       const expressions::compare_expression_ptr& filter)
+                                                       const expressions::compare_expression_ptr& filter,
+                                                       vector_search::filter_strategy strategy)
         : read_only_operator_t(resource, log, operator_type::vector_search)
         , name_(std::move(name))
         , column_name_(std::move(column_name))
         , query_vector_(std::move(query_vector))
         , k_(k)
         , metric_(metric)
-        , filter_(filter) {}
+        , filter_(filter)
+        , strategy_(strategy) {}
+
+    namespace {
+        /// Evaluate a table_filter_t against a single row of a data chunk.
+        /// Supports constant comparisons, IS [NOT] NULL, AND/OR conjunctions.
+        bool evaluate_filter_on_row(const table::table_filter_t& filter,
+                                    const vector::data_chunk_t& data,
+                                    uint64_t row) {
+            using namespace expressions;
+            switch (filter.filter_type) {
+                case compare_type::is_null: {
+                    const auto& f = filter.cast<table::is_null_filter_t>();
+                    if (f.table_indices.empty()) return false;
+                    return data.value(f.table_indices[0], row).is_null();
+                }
+                case compare_type::is_not_null: {
+                    const auto& f = filter.cast<table::is_null_filter_t>();
+                    if (f.table_indices.empty()) return false;
+                    return !data.value(f.table_indices[0], row).is_null();
+                }
+                case compare_type::union_or: {
+                    const auto& f = filter.cast<table::conjunction_or_filter_t>();
+                    for (const auto& child : f.child_filters) {
+                        if (evaluate_filter_on_row(*child, data, row)) return true;
+                    }
+                    return false;
+                }
+                case compare_type::union_and: {
+                    const auto& f = filter.cast<table::conjunction_and_filter_t>();
+                    for (const auto& child : f.child_filters) {
+                        if (!evaluate_filter_on_row(*child, data, row)) return false;
+                    }
+                    return true;
+                }
+                default: {
+                    const auto& f = filter.cast<table::constant_filter_t>();
+                    if (f.table_indices.empty()) return false;
+                    return f.compare(data.value(f.table_indices[0], row));
+                }
+            }
+        }
+    } // namespace
 
     void operator_vector_search_t::on_execute_impl(pipeline::context_t* /*pipeline_context*/) {
-        if (name_.empty()) {
+        if (name_.empty() || query_vector_.empty() || k_ == 0) {
+            output_ = make_operator_data(resource_, std::pmr::vector<types::complex_logical_type>{resource_});
+            mark_executed();
             return;
         }
         async_wait();
@@ -41,24 +88,45 @@ namespace components::operators {
             actor_zeta::send(ctx->disk_address, &services::disk::manager_disk_t::storage_types, ctx->session, name_);
         auto types = co_await std::move(tf);
 
-        // Build filter from expression, if present
-        std::unique_ptr<components::table::table_filter_t> filter = nullptr;
+        // Build filter from expression, if present.
+        // For pre_filter strategy it's pushed to storage_scan; for post_filter we keep it
+        // and evaluate row-by-row after kNN.
+        std::unique_ptr<components::table::table_filter_t> scan_filter;
+        std::unique_ptr<components::table::table_filter_t> post_filter;
         if (filter_) {
-            filter = transform_predicate(filter_, types, &ctx->parameters);
+            auto built = transform_predicate(filter_, types, &ctx->parameters);
+            if (strategy_ == vector_search::filter_strategy::pre_filter) {
+                scan_filter = std::move(built);
+            } else {
+                post_filter = std::move(built);
+            }
         }
 
-        // Step 2: Full scan (or filtered scan) to get target data for kNN
+        // Step 2: Scan to get target data for kNN
         auto [_s, sf] = actor_zeta::send(ctx->disk_address,
                                          &services::disk::manager_disk_t::storage_scan,
                                          ctx->session,
                                          name_,
-                                         std::move(filter), // optional pre-filter
-                                         -1,                // no limit
+                                         std::move(scan_filter),
+                                         -1, // no limit
                                          ctx->txn);
         auto data = co_await std::move(sf);
 
+        // Build full output schema: storage columns + vector_distance
+        auto build_schema = [&](uint64_t col_count, auto col_type_at) {
+            std::pmr::vector<types::complex_logical_type> out_types(resource_);
+            out_types.reserve(col_count + 1);
+            for (uint64_t col = 0; col < col_count; ++col) {
+                out_types.push_back(col_type_at(col));
+            }
+            out_types.push_back(types::complex_logical_type(types::logical_type::DOUBLE, "vector_distance"));
+            return out_types;
+        };
+
         if (!data || data->size() == 0) {
-            output_ = make_operator_data(resource_, std::pmr::vector<types::complex_logical_type>{resource_});
+            auto out_types = build_schema(static_cast<uint64_t>(types.size()),
+                                          [&](uint64_t col) { return types[col]; });
+            output_ = make_operator_data(resource_, std::move(out_types));
             mark_executed();
             co_return;
         }
@@ -67,9 +135,10 @@ namespace components::operators {
         auto target_col = data->column_index(column_name_);
 
         if (target_col == static_cast<size_t>(-1)) {
-            // Column not found — set error and return empty
             set_error("vector_search: column '" + column_name_ + "' not found");
-            output_ = make_operator_data(resource_, std::pmr::vector<types::complex_logical_type>{resource_});
+            auto out_types = build_schema(data->column_count(),
+                                          [&](uint64_t col) { return data->data[col].type(); });
+            output_ = make_operator_data(resource_, std::move(out_types));
             mark_executed();
             co_return;
         }
@@ -79,6 +148,9 @@ namespace components::operators {
         std::size_t dim = query_vector_.size();
 
         vector_search::top_k_heap_t heap(k_);
+
+        // Reused per-row buffer to avoid one allocation per row.
+        std::vector<double> row_vec(dim);
 
         for (uint64_t row = 0; row < num_rows; ++row) {
             auto val = data->value(target_col, row);
@@ -94,8 +166,6 @@ namespace components::operators {
                 continue; // skip dimension mismatch
             }
 
-            // Convert children to double array
-            std::vector<double> row_vec(dim);
             bool valid = true;
             for (std::size_t d = 0; d < dim; ++d) {
                 auto child_type = children[d].type().type();
@@ -127,21 +197,26 @@ namespace components::operators {
         // Step 5: Build output with Top-K rows + distance score column
         auto results = heap.drain_sorted();
 
+        // post_filter strategy: apply WHERE predicate to Top-K AFTER kNN
+        if (post_filter) {
+            std::vector<vector_search::scored_entry_t> kept;
+            kept.reserve(results.size());
+            for (const auto& entry : results) {
+                if (evaluate_filter_on_row(*post_filter, *data, static_cast<uint64_t>(entry.row_id))) {
+                    kept.push_back(entry);
+                }
+            }
+            results = std::move(kept);
+        }
+
+        auto out_types =
+            build_schema(data->column_count(), [&](uint64_t col) { return data->data[col].type(); });
+
         if (results.empty()) {
-            output_ = make_operator_data(resource_, std::pmr::vector<types::complex_logical_type>{resource_});
+            output_ = make_operator_data(resource_, std::move(out_types));
             mark_executed();
             co_return;
         }
-
-        // Create a new data chunk with only the selected rows
-        // Copy column types from original data
-        std::pmr::vector<types::complex_logical_type> out_types(resource_);
-        for (uint64_t col = 0; col < data->column_count(); ++col) {
-            out_types.push_back(data->data[col].type());
-        }
-        // Add a score column
-        auto score_type = types::complex_logical_type(types::logical_type::DOUBLE, "vector_distance");
-        out_types.push_back(score_type);
 
         auto result_chunk =
             std::make_unique<vector::data_chunk_t>(resource_, out_types, static_cast<uint64_t>(results.size()));

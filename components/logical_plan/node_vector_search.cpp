@@ -9,12 +9,14 @@ namespace components::logical_plan {
                                                std::string column_name,
                                                std::vector<double> query_vector,
                                                std::size_t k,
-                                               vector_search::metric_type metric)
+                                               vector_search::metric_type metric,
+                                               vector_search::filter_strategy strategy)
         : node_t(resource, node_type::vector_search_t, collection)
         , column_name_(std::move(column_name))
         , query_vector_(std::move(query_vector))
         , k_(k)
-        , metric_(metric) {}
+        , metric_(metric)
+        , strategy_(strategy) {}
 
     hash_t node_vector_search_t::hash_impl() const { return 0; }
 
@@ -32,9 +34,15 @@ namespace components::logical_plan {
                                                    std::vector<double> query_vector,
                                                    std::size_t k,
                                                    vector_search::metric_type metric,
-                                                   const expressions::expression_ptr& filter) {
-        node_vector_search_ptr node =
-            new node_vector_search_t{resource, collection, std::move(column_name), std::move(query_vector), k, metric};
+                                                   const expressions::compare_expression_ptr& filter,
+                                                   vector_search::filter_strategy strategy) {
+        node_vector_search_ptr node = new node_vector_search_t{resource,
+                                                               collection,
+                                                               std::move(column_name),
+                                                               std::move(query_vector),
+                                                               k,
+                                                               metric,
+                                                               strategy};
         if (filter) {
             node->append_expression(filter);
         }
