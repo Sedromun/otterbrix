@@ -197,7 +197,11 @@ namespace {
 // Scenario 1: scalability over N (rows) at fixed D, K
 // ===========================================================================
 TEST_CASE("vector_search_bench::scalability_over_N") {
-    const std::vector<std::size_t> row_counts = {1000, 3000, 6000};
+    const std::vector<std::size_t> row_counts = {
+        200,    400,    700,    1000,   1400,   2000,   2700,   3600,
+        4800,   6300,   8200,   10500,  13500,  17000,  21500,  27000,
+        33500,  41000,  50000,  60000,  72000,  85000,  100000
+    };
     const std::size_t dim = 128;
     const std::size_t k = 10;
     const std::size_t iterations = 30;
@@ -237,7 +241,11 @@ TEST_CASE("vector_search_bench::scalability_over_N") {
 // Scenario 2: scalability over D (dimension) at fixed N, K
 // ===========================================================================
 TEST_CASE("vector_search_bench::scalability_over_D") {
-    const std::vector<std::size_t> dims = {32, 128, 512};
+    const std::vector<std::size_t> dims = {
+        4,   8,   12,  16,  24,  32,  48,  64,  80,   96,   128,  160,
+        192, 224, 256, 320, 384, 448, 512, 640, 768,  896,  1024, 1280,
+        1536, 1792, 2048
+    };
     const std::size_t N = 3000;
     const std::size_t k = 10;
     const std::size_t iterations = 30;
@@ -273,7 +281,10 @@ TEST_CASE("vector_search_bench::scalability_over_D") {
 // Scenario 3: scalability over K at fixed N, D
 // ===========================================================================
 TEST_CASE("vector_search_bench::scalability_over_K") {
-    const std::vector<std::size_t> ks = {1, 10, 100};
+    const std::vector<std::size_t> ks = {
+        1,    2,    3,    5,    7,    10,   15,   20,   30,   45,   65,   90,
+        125,  175,  250,  350,  500,  700,  1000, 1400, 1800, 2300, 2800
+    };
     const std::size_t N = 3000;
     const std::size_t dim = 128;
     const std::size_t iterations = 30;
@@ -308,7 +319,7 @@ TEST_CASE("vector_search_bench::scalability_over_K") {
 // Scenario 4: filter strategy comparison — pre vs post — at varying selectivity
 // ===========================================================================
 TEST_CASE("vector_search_bench::filter_strategy_comparison") {
-    const std::size_t N = 5000;
+    const std::size_t N = 15000;
     const std::size_t dim = 128;
     const std::size_t k = 10;
     const std::size_t iterations = 30;
@@ -335,9 +346,30 @@ TEST_CASE("vector_search_bench::filter_strategy_comparison") {
     };
     const std::vector<sel_t> selectivities = {
         {"~100%", ""},
-        {"~50%", " WHERE category >= 50"},
-        {"~10%", " WHERE category >= 90"},
-        {"~1%",  " WHERE category >= 99"},
+        {"~98%",  " WHERE category >= 2"},
+        {"~95%",  " WHERE category >= 5"},
+        {"~92%",  " WHERE category >= 8"},
+        {"~88%",  " WHERE category >= 12"},
+        {"~83%",  " WHERE category >= 17"},
+        {"~78%",  " WHERE category >= 22"},
+        {"~72%",  " WHERE category >= 28"},
+        {"~66%",  " WHERE category >= 34"},
+        {"~60%",  " WHERE category >= 40"},
+        {"~54%",  " WHERE category >= 46"},
+        {"~48%",  " WHERE category >= 52"},
+        {"~42%",  " WHERE category >= 58"},
+        {"~36%",  " WHERE category >= 64"},
+        {"~30%",  " WHERE category >= 70"},
+        {"~25%",  " WHERE category >= 75"},
+        {"~20%",  " WHERE category >= 80"},
+        {"~16%",  " WHERE category >= 84"},
+        {"~12%",  " WHERE category >= 88"},
+        {"~9%",   " WHERE category >= 91"},
+        {"~7%",   " WHERE category >= 93"},
+        {"~5%",   " WHERE category >= 95"},
+        {"~3%",   " WHERE category >= 97"},
+        {"~2%",   " WHERE category >= 98"},
+        {"~1%",   " WHERE category >= 99"},
     };
 
     for (const auto& sel : selectivities) {
