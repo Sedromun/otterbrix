@@ -6,6 +6,7 @@ set(${PROJECT_NAME}_SOURCES
         test_distance_metrics.cpp
         test_top_k_and_knn.cpp
         test_recall.cpp
+        test_hnsw_index.cpp
 )
 
 add_executable(${PROJECT_NAME} main.cpp ${${PROJECT_NAME}_SOURCES})

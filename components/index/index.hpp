@@ -5,8 +5,15 @@
 #include <components/table/row_version_manager.hpp>
 #include <core/pmr.hpp>
 #include <functional>
+#include <vector_search/distance_metrics.hpp>
 
 namespace components::index {
+
+    /// Result of a single kNN hit returned by a vector index.
+    struct knn_score_t {
+        int64_t row_index;
+        double  distance;
+    };
 
     struct index_value_t {
         int64_t row_index;
@@ -106,6 +113,15 @@ namespace components::index {
         std::pmr::vector<int64_t> search(expressions::compare_type compare, const value_t& value) const;
         std::pmr::vector<int64_t>
         search(expressions::compare_type compare, const value_t& value, uint64_t start_time, uint64_t txn_id) const;
+
+        /// Approximate k-Nearest Neighbors search. Only meaningful for vector
+        /// indexes (e.g. index_type::vector_hnsw). Default implementation in
+        /// the base class returns an empty result so that non-vector indexes
+        /// transparently signal "not supported".
+        virtual std::vector<knn_score_t> knn_search(const float* query,
+                                                    std::size_t dim,
+                                                    std::size_t k,
+                                                    vector_search::metric_type metric) const;
 
         void insert(value_t key, int64_t row_index, uint64_t txn_id);
         void mark_delete(value_t key, int64_t row_index, uint64_t txn_id);

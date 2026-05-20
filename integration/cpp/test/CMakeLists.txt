@@ -89,12 +89,9 @@ target_link_libraries(bench_vector_search PRIVATE
         cpp_otterbrix
         otterbrix::test_generaty
         otterbrix::log
-        otterbrix::collection
+        otterbrix::services
         otterbrix::cursor
         otterbrix::session
-        otterbrix::dispatcher
-        otterbrix::wal
-        otterbrix::disk
         otterbrix::locks
         spdlog::spdlog
         msgpackc-cxx

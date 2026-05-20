@@ -14,6 +14,7 @@ namespace components::logical_plan {
         multikey,
         hashed,
         wildcard,
+        vector_hnsw,
         no_valid = 255
     };
 

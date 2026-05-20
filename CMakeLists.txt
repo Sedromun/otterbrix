@@ -131,6 +131,24 @@ find_package(ZLIB 1.2.12 REQUIRED)
 find_package(BZip2 1.0.8 REQUIRED)
 find_package(actor-zeta REQUIRED)
 
+# hnswlib — header-only ANN library (Apache 2.0). Pulled via FetchContent
+# since it is not currently published to Conan Center.
+include(FetchContent)
+FetchContent_Declare(
+        hnswlib_fetch
+        GIT_REPOSITORY https://github.com/nmslib/hnswlib.git
+        GIT_TAG        v0.8.0
+        GIT_SHALLOW    TRUE
+)
+# hnswlib's own CMakeLists builds examples we don't need; disable add_subdirectory
+# by populating without configuring, then expose headers via an INTERFACE target.
+set(FETCHCONTENT_QUIET TRUE)
+FetchContent_MakeAvailable(hnswlib_fetch)
+if (NOT TARGET hnswlib)
+    add_library(hnswlib INTERFACE)
+    target_include_directories(hnswlib INTERFACE ${hnswlib_fetch_SOURCE_DIR})
+endif()
+
 if (ENABLE_ASAN AND NOT APPLE)
     # build abseil-cpp locally to avoid ABI issues (skip on macOS ARM64 due to SSE flags)
     include(FetchContent)

@@ -1,7 +1,6 @@
 #include "operator_vector_search.hpp"
 
 #include <components/physical_plan/operators/scan/full_scan.hpp>
-#include <components/physical_plan/operators/transformation.hpp>
 #include <components/table/column_state.hpp>
 #include <components/vector/data_chunk.hpp>
 #include <services/disk/manager_disk.hpp>
@@ -135,7 +134,9 @@ namespace components::operators {
         auto target_col = data->column_index(column_name_);
 
         if (target_col == static_cast<size_t>(-1)) {
-            set_error("vector_search: column '" + column_name_ + "' not found");
+            set_error(core::error_t(core::error_code_t::other_error,
+                                    std::pmr::string{"vector_search: column '" + column_name_ + "' not found",
+                                                     resource_}));
             auto out_types = build_schema(data->column_count(),
                                           [&](uint64_t col) { return data->data[col].type(); });
             output_ = make_operator_data(resource_, std::move(out_types));

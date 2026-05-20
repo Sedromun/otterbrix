@@ -19,12 +19,9 @@ target_link_libraries(
         cpp_otterbrix
         otterbrix::test_generaty
         otterbrix::log
-        otterbrix::collection
+        otterbrix::services
         otterbrix::cursor
         otterbrix::session
-        otterbrix::dispatcher
-        otterbrix::wal
-        otterbrix::disk
         otterbrix::locks
         actor-zeta::actor-zeta
         Catch2::Catch2
