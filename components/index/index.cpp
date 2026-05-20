@@ -65,11 +65,10 @@ namespace components::index {
         return result;
     }
 
-    std::vector<knn_score_t> index_t::knn_search(const float* /*query*/,
-                                                  std::size_t /*dim*/,
-                                                  std::size_t /*k*/,
-                                                  vector_search::metric_type /*metric*/) const {
-        // Non-vector indexes do not support k-Nearest Neighbors search.
+    std::vector<knn_score_t> index_t::knn_search(const float*,
+                                                  std::size_t,
+                                                  std::size_t,
+                                                  vector_search::metric_type) const {
         return {};
     }
 

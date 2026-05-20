@@ -131,8 +131,7 @@ find_package(ZLIB 1.2.12 REQUIRED)
 find_package(BZip2 1.0.8 REQUIRED)
 find_package(actor-zeta REQUIRED)
 
-# hnswlib — header-only ANN library (Apache 2.0). Pulled via FetchContent
-# since it is not currently published to Conan Center.
+# hnswlib (header-only, Apache 2.0) — pulled via FetchContent.
 include(FetchContent)
 FetchContent_Declare(
         hnswlib_fetch
@@ -140,8 +139,6 @@ FetchContent_Declare(
         GIT_TAG        v0.8.0
         GIT_SHALLOW    TRUE
 )
-# hnswlib's own CMakeLists builds examples we don't need; disable add_subdirectory
-# by populating without configuring, then expose headers via an INTERFACE target.
 set(FETCHCONTENT_QUIET TRUE)
 FetchContent_MakeAvailable(hnswlib_fetch)
 if (NOT TARGET hnswlib)

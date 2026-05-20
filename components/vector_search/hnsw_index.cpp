@@ -1,24 +1,19 @@
 #include "hnsw_index.hpp"
 
-// hnswlib headers — included only in the .cpp so its templates do not leak
-// into our public API (and so the rest of the project does not need its
-// include path).
+// hnswlib headers stay in the .cpp so its templates do not leak through.
 #include <hnswlib/hnswlib.h>
 
 #include <cmath>
-#include <utility>
+#include <stdexcept>
 
 namespace components::vector_search {
 
     namespace {
 
-        /// Build the appropriate space (L2 / IP) for a given metric.
-        /// Cosine is implemented as L2 over unit-normalized vectors at the
-        /// caller side; here it shares the L2 space.
         std::unique_ptr<hnswlib::SpaceInterface<float>> make_space(std::size_t dim, metric_type metric) {
             switch (metric) {
                 case metric_type::l2:
-                case metric_type::cosine:
+                case metric_type::cosine: // L2 over unit-normalized vectors
                     return std::make_unique<hnswlib::L2Space>(dim);
                 case metric_type::inner_product:
                     return std::make_unique<hnswlib::InnerProductSpace>(dim);
@@ -40,18 +35,27 @@ namespace components::vector_search {
             for (std::size_t i = 0; i < dim; ++i) dst[i] = src[i] * inv;
         }
 
+        std::vector<scored_entry_t> drain_to_sorted(
+            std::priority_queue<std::pair<float, hnswlib::labeltype>>&& pq) {
+            std::vector<scored_entry_t> out;
+            out.reserve(pq.size());
+            while (!pq.empty()) {
+                auto [dist, label] = pq.top();
+                pq.pop();
+                out.push_back({static_cast<std::size_t>(label), static_cast<double>(dist)});
+            }
+            std::reverse(out.begin(), out.end());
+            return out;
+        }
+
     } // namespace
 
     hnsw_index_t::hnsw_index_t(std::size_t dim, metric_type metric, const hnsw_params_t& params)
         : dim_(dim)
         , metric_(metric)
         , params_(params) {
-        if (dim == 0) {
-            throw std::invalid_argument("hnsw_index_t: dimension must be > 0");
-        }
-        if (params.max_elements == 0) {
-            throw std::invalid_argument("hnsw_index_t: max_elements must be > 0");
-        }
+        if (dim == 0) throw std::invalid_argument("hnsw_index_t: dimension must be > 0");
+        if (params.max_elements == 0) throw std::invalid_argument("hnsw_index_t: max_elements must be > 0");
         space_ = make_space(dim, metric);
         index_ = std::make_unique<hnswlib::HierarchicalNSW<float>>(space_.get(),
                                                                    params.max_elements,
@@ -89,50 +93,25 @@ namespace components::vector_search {
     void hnsw_index_t::add(std::size_t row_id, const float* vec) {
         std::vector<float> buf;
         const float* prepared = prepare_input(vec, buf);
-        index_->addPoint(static_cast<const void*>(prepared), static_cast<hnswlib::labeltype>(row_id));
+        index_->addPoint(prepared, static_cast<hnswlib::labeltype>(row_id));
     }
 
     void hnsw_index_t::add(std::size_t row_id, const double* vec) {
         std::vector<float> buf;
         const float* prepared = prepare_input(vec, buf);
-        index_->addPoint(static_cast<const void*>(prepared), static_cast<hnswlib::labeltype>(row_id));
+        index_->addPoint(prepared, static_cast<hnswlib::labeltype>(row_id));
     }
 
     std::vector<scored_entry_t> hnsw_index_t::search(const float* query, std::size_t k) const {
         std::vector<float> buf;
         const float* prepared = prepare_input(query, buf);
-
-        // hnswlib returns a max-heap of (distance, label); drain it and reverse.
-        auto pq = index_->searchKnn(static_cast<const void*>(prepared), k);
-
-        std::vector<scored_entry_t> out;
-        out.reserve(pq.size());
-        while (!pq.empty()) {
-            auto [dist, label] = pq.top();
-            pq.pop();
-            // For cosine we returned L2² of unit-normalized vectors, which is
-            // monotonic with cosine distance — keep as-is; callers should not
-            // interpret the absolute value when comparing across metrics.
-            out.push_back({static_cast<std::size_t>(label), static_cast<double>(dist)});
-        }
-        std::reverse(out.begin(), out.end());
-        return out;
+        return drain_to_sorted(index_->searchKnn(prepared, k));
     }
 
     std::vector<scored_entry_t> hnsw_index_t::search(const double* query, std::size_t k) const {
         std::vector<float> buf;
         const float* prepared = prepare_input(query, buf);
-        auto pq = index_->searchKnn(static_cast<const void*>(prepared), k);
-
-        std::vector<scored_entry_t> out;
-        out.reserve(pq.size());
-        while (!pq.empty()) {
-            auto [dist, label] = pq.top();
-            pq.pop();
-            out.push_back({static_cast<std::size_t>(label), static_cast<double>(dist)});
-        }
-        std::reverse(out.begin(), out.end());
-        return out;
+        return drain_to_sorted(index_->searchKnn(prepared, k));
     }
 
     void hnsw_index_t::set_ef_search(std::size_t ef) {
